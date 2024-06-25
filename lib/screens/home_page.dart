@@ -14,34 +14,49 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final TextEditingController _amountController = TextEditingController();
-  var paymentIntent;
+  bool loading = false;
+  Map? paymentIntent;
+
+  String get stripeAmount {
+    int amount = int.parse(_amountController.text) * 100;
+    return amount.toString();
+  }
 
   makePayment() async {
     try {
-      paymentIntent = await createPaymentIntent('100', 'USD');
-
+      setState(() {
+        loading = true;
+      });
+      paymentIntent = await createPaymentIntent('INR');
+      debugPrint('Payment intent is:---> $paymentIntent');
       await Stripe.instance
           .initPaymentSheet(
-              paymentSheetParameters: SetupPaymentSheetParameters(
-                  paymentIntentClientSecret: paymentIntent![
-                      'client_secret'], //Gotten from payment intent
-                  style: ThemeMode.light,
-                  merchantDisplayName: 'Ikay'))
+            paymentSheetParameters: SetupPaymentSheetParameters(
+              paymentIntentClientSecret:
+                  paymentIntent!['client_secret'], //Gotten from payment intent
+              style: ThemeMode.light,
+              merchantDisplayName: 'Ikay',
+            ),
+          )
           .then((value) {});
 
       displayPaymentSheet();
+      setState(() {
+        loading = false;
+      });
     } catch (err) {
+      debugPrint('Exception is:---> $err');
       throw Exception(err);
     }
   }
 
-  createPaymentIntent(String amount, String currency) async {
+  createPaymentIntent(String currency) async {
     try {
       Map<String, dynamic> body = {
-        'amount': _amountController.text,
+        'amount': stripeAmount,
         'currency': currency,
       };
-
+      debugPrint('Body is:---> $body');
       var response = await http.post(
         Uri.parse('https://api.stripe.com/v1/payment_intents'),
         headers: {
@@ -50,8 +65,10 @@ class _HomePageState extends State<HomePage> {
         },
         body: body,
       );
+      debugPrint('Response is:---> ${response.body}');
       return json.decode(response.body);
     } catch (err) {
+      debugPrint('Error is:---> $err');
       throw Exception(err.toString());
     }
   }
@@ -59,12 +76,45 @@ class _HomePageState extends State<HomePage> {
   displayPaymentSheet() async {
     try {
       await Stripe.instance.presentPaymentSheet().then((value) {
+        showDialog(
+            context: context,
+            builder: (_) => const AlertDialog(
+                  content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.check_circle,
+                        color: Colors.green,
+                        size: 100.0,
+                      ),
+                      SizedBox(height: 10.0),
+                      Text("Payment Successful!"),
+                    ],
+                  ),
+                ));
+
         paymentIntent = null;
       }).onError((error, stackTrace) {
         throw Exception(error);
       });
     } on StripeException catch (e) {
       debugPrint('Error is:---> $e');
+      const AlertDialog(
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.cancel,
+                  color: Colors.red,
+                ),
+                Text("Payment Failed"),
+              ],
+            ),
+          ],
+        ),
+      );
     } catch (e) {
       debugPrint('$e');
     }
@@ -92,12 +142,17 @@ class _HomePageState extends State<HomePage> {
                 ),
               ),
             ),
-            ElevatedButton(
-              onPressed: () {
-                makePayment();
-              },
-              child: const Text('Pay'),
-            ),
+            loading
+                ? const CircularProgressIndicator()
+                : ElevatedButton(
+                    onPressed: () async {
+                      if (_amountController.text.isEmpty || loading) {
+                        return;
+                      }
+                      makePayment();
+                    },
+                    child: const Text('Pay'),
+                  ),
           ],
         ),
       ),
